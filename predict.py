@@ -1,4 +1,7 @@
 #!bin/usr/python
+import sys
+sys.path.append("../../")
+from parse import *
 from fnn import *
 class myBackpropTrainer(BackpropTrainer):
     def setPen(self, pen):
@@ -42,7 +45,7 @@ class fnn:
                 inLayer = LinearLayer(ninput)
                 hiddenLayer1 = SigmoidLayer(12)
                 hiddenLayer2 = SigmoidLayer(8)
-                outLayer = SigmoidLayer(1)
+                outLayer = SigmoidLayer(2)
                 self.net.addInputModule(inLayer)
                 self.net.addModule(hiddenLayer1)
                 self.net.addModule(hiddenLayer2)
@@ -64,42 +67,129 @@ class fnn:
                 #   outclass = SigmoidLayer,
 		#   recurrent=True
                 #)
-		ds = SupervisedDataSet(ninput, 1)
-		for i in range(len(dataset[4])):
-			ind = numpy.array(dataset[4][i])
-			ds.addSample((ind), dataset[2][i]/2.0)
+		ds = SupervisedDataSet(ninput, 2)
+		for i in range(len(dataset[6])):
+			ind = numpy.array(dataset[6][i])
+			ind_out=numpy.array([dataset[2][i]/2.0,dataset[3][i]/2.0])
+			ds.addSample((ind), (ind_out))
 		self.trainer = BackpropTrainer(self.net, ds, learningrate = 0.05, momentum=0.4, verbose = True)
 		self.trainer.trainUntilConvergence(maxEpochs = 400)
 	def predict(self,data):
                 ind = numpy.array(data[:])
-                return (self.net.activate(ind)*2.0)[0]
+                return (self.net.activate(ind)*2.0)[0],(self.net.activate(ind)*2.0)[1]
 	def predictN(self,dataset):
-		dataset[3]=[0.0 for i in range(len(dataset[4]))]
+		dataset[4]=[0.0 for i in range(len(dataset[6]))]
+		dataset[5]=[0.0 for i in range(len(dataset[6]))]
 		for i in range(len(dataset[4])):
-			dataset[3][i] = self.predict(dataset[4][i])
+			dataset[4][i],dataset[5][i] = self.predict(dataset[6][i])
 		for i in range(len(dataset[2])):
-			print dataset[1][i]+"\t"+str(dataset[2][i])+"\t"+str(dataset[3][i])
+			print dataset[1][i]+"\t"+str(dataset[2][i])+"\t"+str(dataset[3][i])+"\t"+str(dataset[4][i])+"\t"+str(dataset[5][i])
 			#pass
 		
-def parseInput(filename,name1,name2):
-	inputs = open(filename)
-	dataset1 = [[name1],[],[],[],[]]
-	dataset2 = [[name2],[],[],[],[]]
+def parseInput(filename,name):
+	inputs = open(filename)		       ## 0	  1		2	          3		    4			5			6
+	dataset = [[name],[],[],[],[],[],[]] ## name,benchmark name ,speedup, otherway speedup,predicted speedup,predicted otherwway speedup,hardware counters
 	for line in inputs.readlines():
 		datas = line.split("\t")
-		dataset1[1].append(datas[0])
-		dataset2[1].append(datas[0])
-		dataset1[2].append(float(datas[1]))
-		dataset2[2].append(float(datas[2]))
-		dataset=[]
+		dataset[1].append(datas[0])
+		dataset[2].append(float(datas[1]))
+		dataset[3].append(float(datas[2]))
+		dat=[]
 		for data in datas[4:]:
-			dataset.append(float(data)/(float(datas[3])*2.0))	
-		dataset1[4].append(dataset)
-		dataset2[4].append(dataset)
-	return dataset1,dataset2,len(dataset)
+			dat.append(float(data)/(float(datas[3])*2.0))	
+		dataset[6].append(dat)
+	return dataset,len(dat)
+class pred_parse:
+	def __init__(self):
+		self.entries=[]
+		#fetch_icache = cumRecords(".fetch.icacheStallCycles","\s+(\d+)",["testsys.switch_cpus"+str(i) for i in range(4)])
+		self.entries.append(cumRecords("sim_ticks","\s+(\d+)",[""]))
+		self.entries.append(cumRecords(".inst","\s+(\d+)",["system.physmem.num_reads::switch_cpus"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords(".data","\s+(\d+)",["system.physmem.num_reads::switch_cpus"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords("::total","\s+(\d+)",["system.physmem.num_reads"]))
+
+		self.entries.append(cumRecords("","\s+(\d+)",["system.physmem.queueLat::"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords("","\s+(\d+)",["system.physmem.DRAMLat::"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords(".totBankLat","\s+(\d+)",["system.physmem"]))
+                self.entries.append(cumRecords(".totQLat","\s+(\d+)",["system.physmem"]))
+        	self.entries.append(srecord(".readRowHitRate","\s+(\d+.\d+)",["system.physmem"]))
+        	self.entries.append(cumRecords(".totMemAccLat","\s+(\d+)",["system.physmem"]))
+
+		self.entries.append(cumRecords(".inst","\s+(\d+)",["system.l2.ReadReq_misses::switch_cpus"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords(".data","\s+(\d+)",["system.l2.ReadReq_misses::switch_cpus"+str(i) for i in range(4)]))
+        	self.entries.append(cumRecords("::total","\s+(\d+)",["system.l2.ReadReq_misses"]))
+
+		self.entries.append(cumRecords(".commit.committedInsts","\s+(\d+)",["system.switch_cpus"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords(".commit.loads","\s+(\d+)",["system.switch_cpus"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords(".commit.fp_insts","\s+(\d+)",["system.switch_cpus"+str(i) for i in range(4)]))
+
+        	self.entries.append(cumRecords("::total","\s+(\d+)",["system.l2.Writeback_hits"]))
+		self.entries.append(cumRecords(".data","\s+(\d+)",["system.cpu"+str(i)+".dcache.ReadReq_hits::switch_cpus"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords(".data","\s+(\d+)",["system.cpu"+str(i)+".dcache.WriteReq_hits::switch_cpus"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords(".data","\s+(\d+)",["system.cpu"+str(i)+".dcache.ReadReq_misses::switch_cpus"+str(i) for i in range(4)]))
+		self.entries.append(cumRecords(".data","\s+(\d+)",["system.cpu"+str(i)+".dcache.WriteReq_misses::switch_cpus"+str(i) for i in range(4)]))
+
+		self.entries.append(cumRecords("rename.ROBFullEvents","\s+(\d+)",["system.switch_cpus"+str(i) for i in range(4)]))
+	def matchline(self,lines):
+		for line in lines:
+			for entry in self.entries:
+				entry.matchLine(line)
+	def GetEvents(self):
+		for entry in self.entries:
+			entry.update()
+		datas = [[] for i in range(4)]
+		time= self.entries[0].getValue(0)+0.00000000001
+		for i in range(1,len(self.entries)):
+			for j in range(4):
+				datas[j].append(self.entries[i].getValue(j)/(2.0*time))
+		return datas
+				
+class predictions:
+	def __init__ (self,path):
+		self.parse=pred_parse()
+		dataset,num = parseInput(path+"b24G.txt","24G")
+		self.pd24G=fnn(dataset,num)
+		dataset,num = parseInput(path+"b4G.txt","4G")
+		self.pd4G=fnn(dataset,num)
+	def GetEvents(self,handle):
+		datas=self.parse.GetEvents()
+		rel_sets = [[] for i in range(4)]
+		for i in range(4):
+			rel_sets[i]=handle(datas[i])
+		return rel_sets
+	def predict(self,lines,mode):
+		self.parse.matchline(lines)
+		if mode == "24G":
+			return self.GetEvents(self.pd24G.predict)
+		if mode == "4G":
+			return self.GetEvents(self.pd4G.predict)
+		print "error"
+		sys.exit(1)
 if __name__ == "__main__":
-	dataset1, dataset2,num = parseInput("b4G.txt","4Gto4G","4Gto24G")
-	B4g4G4 = fnn(dataset1,num)
-	B4g4G4.predictN(dataset1)
+	pred = predictions("/home/shaoming/script/parse/prediction/")	
+	mheader =  header()
+	file = open("testlmll_4G.txt")
+	lines = []
+	nums = [[]for i in range(8)]
+	n= 0.0
+	for line in file.readlines():	
+		lines.append(line)
+		if mheader.matchLine(line):
+			n += 1.0
+			pairs=pred.predict(lines,"4G")
+			for i in range(4):
+				for j in range(2):
+					nums[i+j*4].append(pairs[i][j])
+			lines =[]
+	results = [[]for i in range(8)]
+	for i in range(8):
+		results[i]=sum(nums[i])/n
+	print results
+	#dataset,num = parseInput("b4G.txt","4G")
+	#B4g4G4 = fnn(dataset,num)
+	#B4g4G4.predictN(dataset)
+	#dataset,num = parseInput("b24G.txt","24G")
+	#B4g4G4 = fnn(dataset,num)
+	#B4g4G4.predictN(dataset)
 	#B4g4G24 = fnn(dataset2,num)
 	#B4g4G24.predictN(dataset2)
